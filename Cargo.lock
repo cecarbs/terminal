@@ -496,6 +496,7 @@ dependencies = [
  "dioxus",
  "dioxus-desktop",
  "nix",
+ "regex",
 ]
 
 [[package]]

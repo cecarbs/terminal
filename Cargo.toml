@@ -9,3 +9,4 @@ edition = "2021"
 dioxus = "0.4.0"
 dioxus-desktop = "0.4.0"
 nix = { version = "0.27.1", features = ["term", "process"] }
+regex = "1.10.2"
