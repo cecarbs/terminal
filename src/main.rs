@@ -6,10 +6,9 @@ use nix::unistd::{read, ForkResult};
 use regex::Regex;
 use std::fs::File;
 use std::io::Write;
-use std::os::fd::IntoRawFd;
+use std::os::fd::{IntoRawFd, OwnedFd};
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::process::Command;
-use std::rc::Rc;
 
 // read from file descriptor
 fn read_from_fd(fd: RawFd) -> Option<Vec<u8>> {
@@ -23,7 +22,8 @@ fn read_from_fd(fd: RawFd) -> Option<Vec<u8>> {
 }
 
 fn remove_ansi_escape_codes(input: &str) -> String {
-    let ansi_escape_code_regex = Regex::new(r"\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]").unwrap();
+    let ansi_escape_code_regex: Regex =
+        Regex::new(r"\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]").unwrap();
 
     ansi_escape_code_regex
         .replace_all(input, "")
@@ -34,7 +34,7 @@ fn remove_ansi_escape_codes(input: &str) -> String {
 fn spawn_pty_with_shell(default_shell: String) -> RawFd {
     match unsafe { forkpty(None, None) } {
         Ok(fork_pty_res) => {
-            let stdout_fd = fork_pty_res.master;
+            let stdout_fd: OwnedFd = fork_pty_res.master;
             if let ForkResult::Child = fork_pty_res.fork_result {
                 Command::new(default_shell)
                     .spawn()
@@ -67,7 +67,7 @@ fn process_user_command(stdout_fd: i32, input: &str) -> String {
         match read_from_fd(stdout_fd) {
             Some(read_bytes) => {
                 let std_out: String = String::from_utf8(read_bytes).unwrap();
-                let bash_response = remove_ansi_escape_codes(&std_out);
+                let bash_response: String = remove_ansi_escape_codes(&std_out);
                 if !bash_response.contains(input) {
                     return bash_response;
                 }
@@ -81,11 +81,11 @@ fn process_user_command(stdout_fd: i32, input: &str) -> String {
 }
 
 fn App(cx: Scope) -> Element {
-    let default_shell = String::from("bash");
+    let default_shell: String = String::from("bash");
     let stdout_fd: i32 = spawn_pty_with_shell(default_shell);
 
     let user_input: &UseState<String> = use_state(cx, || "".to_string());
-    let command = use_ref(cx, Vec::new);
+    let command: &UseRef<Vec<String>> = use_ref(cx, Vec::new);
 
     let handle_input_submit = move |event: KeyboardEvent| {
         if event.key().to_string() == "Enter" {
