@@ -9,6 +9,7 @@ use std::io::Write;
 use std::os::fd::IntoRawFd;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::process::Command;
+use std::rc::Rc;
 
 // read from file descriptor
 fn read_from_fd(fd: RawFd) -> Option<Vec<u8>> {
@@ -49,7 +50,7 @@ fn spawn_pty_with_shell(default_shell: String) -> RawFd {
     }
 }
 
-fn user_command(stdout_fd: i32, input: &str) -> String {
+fn process_user_command(stdout_fd: i32, input: &str) -> String {
     let mut output_file: File = unsafe { File::from_raw_fd(stdout_fd) };
 
     if let Err(e) = write!(output_file, "ls\n") {
@@ -81,16 +82,15 @@ fn user_command(stdout_fd: i32, input: &str) -> String {
 
 fn App(cx: Scope) -> Element {
     let default_shell = String::from("bash");
-    // let default_shell = std::env::var("SHELL").expect("Unable to load shell");
     let stdout_fd: i32 = spawn_pty_with_shell(default_shell);
 
-    let user_input = use_state(cx, || "".to_string());
-    let command = use_state(cx, || "".to_string());
+    let user_input: &UseState<String> = use_state(cx, || "".to_string());
+    let command = use_ref(cx, Vec::new);
 
     let handle_input_submit = move |event: KeyboardEvent| {
         if event.key().to_string() == "Enter" {
-            let response: String = user_command(stdout_fd, user_input);
-            command.set(response);
+            let response: String = process_user_command(stdout_fd, user_input);
+            command.with_mut(|list| list.push(response));
             user_input.set("".to_string());
         };
     };
@@ -109,12 +109,10 @@ fn App(cx: Scope) -> Element {
                 flex_grow: "1",
                 overflow_y: "auto",
                 padding: "10px",
-                p {
-                    if command.chars().count() > 0 {
-                    // "Why don't you just Google the answer?"
-                    command
-                    } else {
-                        ""
+
+                for c in command.read().iter() {
+                    p {
+                       c.clone()
                     }
                 }
             }
