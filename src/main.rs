@@ -4,17 +4,17 @@ use dioxus::prelude::*;
 use nix::pty::forkpty;
 use nix::unistd::{read, ForkResult};
 use regex::Regex;
-// use core::panicking::panic;
-use std::env;
 use std::fs::File;
-use std::io::{Error, Write};
+use std::io::Write;
 use std::os::fd::IntoRawFd;
 use std::os::unix::io::{FromRawFd, RawFd};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
+// read from file descriptor
 fn read_from_fd(fd: RawFd) -> Option<Vec<u8>> {
     let mut read_buffer = [0; 65536];
     let read_result = read(fd, &mut read_buffer);
+    // TODO: look into if let for Results
     match read_result {
         Ok(bytes_read) => Some(read_buffer[..bytes_read].to_vec()),
         Err(_e) => None,
@@ -22,10 +22,8 @@ fn read_from_fd(fd: RawFd) -> Option<Vec<u8>> {
 }
 
 fn remove_ansi_escape_codes(input: &str) -> String {
-    // Regular expression pattern to match ANSI escape codes
     let ansi_escape_code_regex = Regex::new(r"\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]").unwrap();
 
-    // Replace ANSI escape codes with an empty string
     ansi_escape_code_regex
         .replace_all(input, "")
         .to_string()
@@ -51,38 +49,47 @@ fn spawn_pty_with_shell(default_shell: String) -> RawFd {
     }
 }
 
-fn user_command(&stdout_fd: &i32, input: &str) -> String {
-    let output_file: File = unsafe { File::from_raw_fd(stdout_fd) };
-    let mut output = output_file.try_clone().expect("Unable to clone");
+fn user_command(stdout_fd: i32, input: &str) -> String {
+    let mut output_file: File = unsafe { File::from_raw_fd(stdout_fd) };
 
-    if let Err(e) = write!(output, "{} \n", input) {
+    if let Err(e) = write!(output_file, "ls\n") {
         panic!("There was an error writing the output: {:?}", e)
     }
-    match output.flush() {
+    match output_file.flush() {
         Ok(_) => (),
         Err(_) => panic!("There was an error flushing the output!"),
     }
+    let read_buffer: Vec<u8> = vec![];
+    // TODO: append the results from the response to an array and then change the UI to loop
+    // through the array and render the data
     loop {
         match read_from_fd(stdout_fd) {
             Some(read_bytes) => {
                 let std_out: String = String::from_utf8(read_bytes).unwrap();
-                return remove_ansi_escape_codes(&std_out);
+                let bash_response = remove_ansi_escape_codes(&std_out);
+                if !bash_response.contains(input) {
+                    return bash_response;
+                }
             }
-            None => continue,
+            None => {
+                println!("{:?}", String::from_utf8(read_buffer).unwrap());
+                std::process::exit(0)
+            }
         }
     }
 }
 
 fn App(cx: Scope) -> Element {
-    let default_shell = std::env::var("SHELL").expect("Unable to load shell");
-    let stdout_fd = spawn_pty_with_shell(default_shell);
+    let default_shell = String::from("bash");
+    // let default_shell = std::env::var("SHELL").expect("Unable to load shell");
+    let stdout_fd: i32 = spawn_pty_with_shell(default_shell);
 
     let user_input = use_state(cx, || "".to_string());
     let command = use_state(cx, || "".to_string());
 
     let handle_input_submit = move |event: KeyboardEvent| {
         if event.key().to_string() == "Enter" {
-            let response = user_command(&stdout_fd, user_input);
+            let response: String = user_command(stdout_fd, user_input);
             command.set(response);
             user_input.set("".to_string());
         };
@@ -146,9 +153,6 @@ fn App(cx: Scope) -> Element {
 }
 
 fn main() {
-    // let shell = std::env::var("SHELL").expect("Unable to load shell");
-    // let pty = spawn_pty_with_shell(shell);
-    // let output_fd: File = unsafe { File::from_raw_fd(pty) };
     dioxus_desktop::launch_cfg(
         App,
         dioxus_desktop::Config::new()
