@@ -39,7 +39,7 @@ fn spawn_pty_with_shell(default_shell: String) -> RawFd {
                 Command::new(default_shell)
                     .spawn()
                     .expect("failed to spawn");
-                std::thread::sleep(std::time::Duration::from_millis(2000));
+                std::thread::sleep(std::time::Duration::from_millis(9000));
                 std::process::exit(0);
             }
             stdout_fd.into_raw_fd()
@@ -50,31 +50,33 @@ fn spawn_pty_with_shell(default_shell: String) -> RawFd {
     }
 }
 
-fn process_user_command(stdout_fd: i32, input: &str) -> String {
-    // TODO: from_raw_fd takes ownership of the given file descriptor (stdout_fd);
-    let mut output_file: File = unsafe { File::from_raw_fd(stdout_fd) };
+fn process_user_command(stdout_fd: &UseState<i32>, input: &str) -> String {
+    let mut output_file: File = unsafe { File::from_raw_fd(stdout_fd.into_raw_fd()) };
     let read_buffer: Vec<u8> = vec![];
 
     if let Err(e) = write!(output_file, "{}\n", input) {
         panic!("There was an error writing the output: {:?}", e)
     }
+
     match output_file.flush() {
         Ok(_) => (),
         Err(_) => panic!("There was an error flushing the output!"),
     }
 
     loop {
-        match read_from_fd(stdout_fd) {
+        match read_from_fd(stdout_fd.into_raw_fd()) {
             Some(read_bytes) => {
                 let std_out: String = String::from_utf8(read_bytes).unwrap();
                 let bash_response: String = remove_ansi_escape_codes(&std_out);
                 if !bash_response.contains(input) {
+                    println!("{:?}", bash_response);
                     return bash_response;
                 }
             }
             None => {
-                println!("{:?}", String::from_utf8(read_buffer).unwrap());
-                std::process::exit(0)
+                continue;
+                // println!("{:?}", String::from_utf8(read_buffer).unwrap());
+                // std::process::exit(0)
             }
         }
     }
@@ -82,17 +84,19 @@ fn process_user_command(stdout_fd: i32, input: &str) -> String {
 pub struct Pty {
     fd: i32,
 }
+
 fn App(cx: Scope) -> Element {
-    let default_shell: String = String::from("bash");
-    // TODO: This state needs to be maintained
-    let stdout_fd: i32 = spawn_pty_with_shell(default_shell);
-    let pty: &UseState<Pty> = use_state(cx, || Pty { fd: stdout_fd });
+    let stdout_fd: i32 = spawn_pty_with_shell("bash".to_string());
+    // let pty: &UseState<Pty> = use_state(cx, || Pty { fd: stdout_fd });
+
     let user_input: &UseState<String> = use_state(cx, || "".to_string());
     let command: &UseRef<Vec<String>> = use_ref(cx, Vec::new);
+    let state_stdout_fd: &UseState<i32> =
+        use_state(cx, || spawn_pty_with_shell("bash".to_string()));
 
     let handle_input_submit = move |event: KeyboardEvent| {
         if event.key().to_string() == "Enter" {
-            let response: String = process_user_command(pty.fd, user_input);
+            let response: String = process_user_command(state_stdout_fd, user_input);
             command.with_mut(|list| list.push(response));
             user_input.set("".to_string());
         };
